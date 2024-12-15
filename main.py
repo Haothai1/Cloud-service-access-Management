@@ -9,7 +9,7 @@ import os
 # MySQL Database Configuration
 #DATABASE_URL = "mysql+pymysql://cloud_admin:SecurePass123!@localhost/cloud_service_db"
 DATABASE_URL = os.getenv("DATABASE_URL")
-
+ 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

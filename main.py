@@ -23,10 +23,11 @@ Base = declarative_base()
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String, nullable=True)
-    api_permissions = Column(String, nullable=False)  # Comma-separated APIs
+    name = Column(String(255), unique=True, nullable=False)  # Added length: 255
+    description = Column(String(255), nullable=True)         # Added length: 255
+    api_permissions = Column(String(1024), nullable=False)   # Added length: 1024
     usage_limit = Column(Integer, nullable=False)
+
 
 class UserSubscription(Base):
     __tablename__ = "user_subscriptions"

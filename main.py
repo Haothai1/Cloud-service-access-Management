@@ -3,9 +3,12 @@ from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from dotenv import load_dotenv
+import os
 
 # MySQL Database Configuration
-DATABASE_URL = "mysql+pymysql://cloud_admin:SecurePass123!@localhost/cloud_service_db"
+#DATABASE_URL = "mysql+pymysql://cloud_admin:SecurePass123!@localhost/cloud_service_db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

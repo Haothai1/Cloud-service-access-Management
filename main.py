@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
-# Database Setup
-DATABASE_URL = "sqlite:///./cloud_service.db"  # Update for production DB
+# MySQL Database Configuration
+DATABASE_URL = "mysql+pymysql://cloud_admin:SecurePass123!@localhost/cloud_service_db"
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -17,7 +17,7 @@ class SubscriptionPlan(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=True)
-    api_permissions = Column(String, nullable=False)  # Comma-separated API names
+    api_permissions = Column(String, nullable=False)  # Comma-separated APIs
     usage_limit = Column(Integer, nullable=False)
 
 class UserSubscription(Base):
@@ -28,17 +28,19 @@ class UserSubscription(Base):
     usage_count = Column(Integer, default=0)
     plan = relationship("SubscriptionPlan")
 
+# Create tables in the database
 Base.metadata.create_all(bind=engine)
 
-# FastAPI App
+# FastAPI Application
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# Dependency to get the database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Pydantic Models
 class PlanCreate(BaseModel):
@@ -57,17 +59,15 @@ class SubscriptionAssign(BaseModel):
     user_id: str
     plan_id: int
 
-# Dependency
-async def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# Admin Endpoints
+# Admin: Create a Subscription Plan
 @app.post("/plans")
 async def create_plan(plan: PlanCreate, db: SessionLocal = Depends(get_db)):
+    # Check if a plan with the same name already exists
+    existing_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan.name).first()
+    if existing_plan:
+        raise HTTPException(status_code=400, detail="Plan with this name already exists")
+
+    # If no duplicate, insert the plan
     new_plan = SubscriptionPlan(
         name=plan.name,
         description=plan.description,
@@ -77,37 +77,39 @@ async def create_plan(plan: PlanCreate, db: SessionLocal = Depends(get_db)):
     db.add(new_plan)
     db.commit()
     db.refresh(new_plan)
-    return {"message": "Plan created", "plan_id": new_plan.id}
+    return {"message": "Plan created successfully", "plan_id": new_plan.id}
 
+# Admin: Update a Subscription Plan
 @app.put("/plans/{plan_id}")
 async def update_plan(plan_id: int, plan: PlanUpdate, db: SessionLocal = Depends(get_db)):
-    plan_data = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
-    if not plan_data:
+    existing_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+    if not existing_plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     if plan.name:
-        plan_data.name = plan.name
+        existing_plan.name = plan.name
     if plan.description:
-        plan_data.description = plan.description
+        existing_plan.description = plan.description
     if plan.api_permissions:
-        plan_data.api_permissions = ",".join(plan.api_permissions)
+        existing_plan.api_permissions = ",".join(plan.api_permissions)
     if plan.usage_limit:
-        plan_data.usage_limit = plan.usage_limit
+        existing_plan.usage_limit = plan.usage_limit
 
     db.commit()
-    return {"message": "Plan updated"}
+    return {"message": "Plan updated successfully"}
 
+# Admin: Delete a Subscription Plan
 @app.delete("/plans/{plan_id}")
 async def delete_plan(plan_id: int, db: SessionLocal = Depends(get_db)):
-    plan_data = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
-    if not plan_data:
+    existing_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+    if not existing_plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    db.delete(plan_data)
+    db.delete(existing_plan)
     db.commit()
-    return {"message": "Plan deleted"}
+    return {"message": "Plan deleted successfully"}
 
-# User Subscription Endpoints
+# Admin: Assign/Update User Subscription
 @app.put("/subscriptions")
 async def assign_subscription(subscription: SubscriptionAssign, db: SessionLocal = Depends(get_db)):
     user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == subscription.user_id).first()
@@ -120,8 +122,9 @@ async def assign_subscription(subscription: SubscriptionAssign, db: SessionLocal
         db.add(new_subscription)
 
     db.commit()
-    return {"message": "Subscription updated"}
+    return {"message": "Subscription assigned or updated successfully"}
 
+# User: Get Subscription Details
 @app.get("/subscriptions/{user_id}")
 async def get_subscription(user_id: str, db: SessionLocal = Depends(get_db)):
     user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).first()
@@ -140,7 +143,7 @@ async def get_subscription(user_id: str, db: SessionLocal = Depends(get_db)):
         "usage_count": user_subscription.usage_count,
     }
 
-# Access Control
+# Access Control: Check if API Access is Allowed
 @app.get("/access/{user_id}/{api_request}")
 async def check_access(user_id: str, api_request: str, db: SessionLocal = Depends(get_db)):
     user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).first()

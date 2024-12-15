@@ -109,20 +109,16 @@ async def delete_plan(plan_id: int, db: SessionLocal = Depends(get_db)):
     db.commit()
     return {"message": "Plan deleted successfully"}
 
-# Admin: Assign/Update User Subscription
-@app.put("/subscriptions")
-async def assign_subscription(subscription: SubscriptionAssign, db: SessionLocal = Depends(get_db)):
-    user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == subscription.user_id).first()
-
-    if user_subscription:
-        user_subscription.plan_id = subscription.plan_id
-        user_subscription.usage_count = 0
-    else:
-        new_subscription = UserSubscription(user_id=subscription.user_id, plan_id=subscription.plan_id)
-        db.add(new_subscription)
-
+@app.post("/subscriptions")
+async def subscribe_to_plan(user_id: str, plan_id: int, db: SessionLocal = Depends(get_db)):
+    existing_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).first()
+    if existing_subscription:
+        raise HTTPException(status_code=400, detail="User already has a subscription.")
+    new_subscription = UserSubscription(user_id=user_id, plan_id=plan_id)
+    db.add(new_subscription)
     db.commit()
-    return {"message": "Subscription assigned or updated successfully"}
+    return {"message": f"User {user_id} subscribed to plan {plan_id}"}
+
 
 # User: Get Subscription Details
 @app.get("/subscriptions/{user_id}")
@@ -143,20 +139,104 @@ async def get_subscription(user_id: str, db: SessionLocal = Depends(get_db)):
         "usage_count": user_subscription.usage_count,
     }
 
-# Access Control: Check if API Access is Allowed
+
 @app.get("/access/{user_id}/{api_request}")
 async def check_access(user_id: str, api_request: str, db: SessionLocal = Depends(get_db)):
     user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).first()
     if not user_subscription:
-        raise HTTPException(status_code=404, detail="Subscription not found")
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found or has no subscription.")
 
     plan = user_subscription.plan
     if api_request not in plan.api_permissions.split(","):
-        raise HTTPException(status_code=403, detail="Access denied: API not permitted")
+        raise HTTPException(status_code=403, detail=f"Access denied: API '{api_request}' not allowed in the plan.")
 
     if user_subscription.usage_count >= plan.usage_limit:
-        raise HTTPException(status_code=403, detail="Access denied: Usage limit exceeded")
+        raise HTTPException(status_code=403, detail="Access denied: Usage limit exceeded.")
 
     user_subscription.usage_count += 1
     db.commit()
     return {"message": "Access granted"}
+
+@app.get("/subscriptions/{user_id}/usage")
+async def get_usage(user_id: str, db: SessionLocal = Depends(get_db)):
+    user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).first()
+    if not user_subscription:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+
+    plan = user_subscription.plan
+    return {
+        "user_id": user_id,
+        "plan_name": plan.name,
+        "usage_count": user_subscription.usage_count,
+        "usage_limit": plan.usage_limit,
+        "remaining_usage": plan.usage_limit - user_subscription.usage_count
+    }
+
+class Permission(Base):
+    __tablename__ = "permissions"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)  # Permission name
+    description = Column(String, nullable=True)
+    api_endpoint = Column(String, unique=True, nullable=False)  # Associated API
+
+@app.post("/permissions")
+async def add_permission(name: str, api_endpoint: str, description: Optional[str] = None, db: SessionLocal = Depends(get_db)):
+    existing_permission = db.query(Permission).filter(Permission.name == name).first()
+    if existing_permission:
+        raise HTTPException(status_code=400, detail="Permission already exists.")
+    new_permission = Permission(name=name, description=description, api_endpoint=api_endpoint)
+    db.add(new_permission)
+    db.commit()
+    return {"message": "Permission added successfully", "id": new_permission.id}
+
+
+@app.put("/permissions/{permissionId}")
+async def modify_permission(permissionId: int, name: Optional[str], api_endpoint: Optional[str], description: Optional[str], db: SessionLocal = Depends(get_db)):
+    permission = db.query(Permission).filter(Permission.id == permissionId).first()
+    if not permission:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    if name:
+        permission.name = name
+    if api_endpoint:
+        permission.api_endpoint = api_endpoint
+    if description:
+        permission.description = description
+    db.commit()
+    return {"message": "Permission updated successfully"}
+
+@app.delete("/permissions/{permissionId}")
+async def delete_permission(permissionId: int, db: SessionLocal = Depends(get_db)):
+    permission = db.query(Permission).filter(Permission.id == permissionId).first()
+    if not permission:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    db.delete(permission)
+    db.commit()
+    return {"message": "Permission deleted successfully"}
+
+@app.post("/usage/{userId}")
+async def track_usage(userId: str, db: SessionLocal = Depends(get_db)):
+    user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == userId).first()
+    if not user_subscription:
+        raise HTTPException(status_code=404, detail="User subscription not found")
+    user_subscription.usage_count += 1
+    db.commit()
+    return {"message": "API usage tracked", "usage_count": user_subscription.usage_count}
+
+
+
+@app.get("/usage/{userId}/limit")
+async def check_limit(userId: str, db: SessionLocal = Depends(get_db)):
+    user_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == userId).first()
+    if not user_subscription:
+        raise HTTPException(status_code=404, detail="User subscription not found")
+    plan = user_subscription.plan
+    remaining = plan.usage_limit - user_subscription.usage_count
+    status = "Within limit" if remaining > 0 else "Limit exceeded"
+    return {
+        "user_id": userId,
+        "plan_name": plan.name,
+        "usage_count": user_subscription.usage_count,
+        "usage_limit": plan.usage_limit,
+        "remaining_usage": remaining,
+        "status": status
+    }

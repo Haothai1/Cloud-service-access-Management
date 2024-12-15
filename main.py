@@ -6,8 +6,14 @@ from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from dotenv import load_dotenv
 import os
 
-# MySQL Database Configuration
+
+# Load .env file
+load_dotenv()
+
+# Get the DATABASE_URL
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set. Please check your environment variables.")
  
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -41,7 +47,7 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-    finally:
+    finally: 
         db.close()
 
 # Pydantic Models

@@ -20,25 +20,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Database Models
-class SubscriptionPlan(Base):
-    __tablename__ = "subscription_plans"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), unique=True, nullable=False)  # Added length: 255
-    description = Column(String(255), nullable=True)         # Added length: 255
-    api_permissions = Column(String(1024), nullable=False)   # Added length: 1024
-    usage_limit = Column(Integer, nullable=False)
 
-
-class UserSubscription(Base):
-    __tablename__ = "user_subscriptions"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String, unique=True, nullable=False)
-    plan_id = Column(Integer, ForeignKey("subscription_plans.id"))
-    usage_count = Column(Integer, default=0)
-    plan = relationship("SubscriptionPlan")
 
 # Create tables in the database
-Base.metadata.create_all(bind=engine)
 
 # FastAPI Application
 app = FastAPI()
@@ -67,6 +51,8 @@ class PlanUpdate(BaseModel):
 class SubscriptionAssign(BaseModel):
     user_id: str
     plan_id: int
+
+
 
 # Admin: Create a Subscription Plan
 @app.post("/plans")
@@ -181,12 +167,38 @@ async def get_usage(user_id: str, db: SessionLocal = Depends(get_db)):
         "remaining_usage": plan.usage_limit - user_subscription.usage_count
     }
 
+
+class SubscriptionPlan(Base):
+    __tablename__ = "subscription_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), unique=True, nullable=False)  # VARCHAR(255)
+    description = Column(String(255), nullable=True)         # VARCHAR(255)
+    api_permissions = Column(String(1024), nullable=False)   # VARCHAR(1024)
+    usage_limit = Column(Integer, nullable=False)
+
+    # Backref to UserSubscription
+    subscriptions = relationship("UserSubscription", back_populates="plan")
+
+
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(255), nullable=False)  # VARCHAR(255)
+    plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=False)
+    usage_count = Column(Integer, default=0, nullable=False)  # Added column for usage count
+
+    # Relationship with SubscriptionPlan
+    plan = relationship("SubscriptionPlan", back_populates="subscriptions")
+
+
 class Permission(Base):
     __tablename__ = "permissions"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)  # Permission name
-    description = Column(String, nullable=True)
-    api_endpoint = Column(String, unique=True, nullable=False)  # Associated API
+    name = Column(String(255), unique=True, nullable=False)  # VARCHAR(255)
+    description = Column(String(255), nullable=True)         # VARCHAR(255)
+    api_endpoint = Column(String(255), unique=True, nullable=False)
+
+Base.metadata.create_all(bind=engine)
 
 @app.post("/permissions")
 async def add_permission(name: str, api_endpoint: str, description: Optional[str] = None, db: SessionLocal = Depends(get_db)):
